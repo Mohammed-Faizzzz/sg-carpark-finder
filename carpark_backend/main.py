@@ -5,6 +5,8 @@ import math
 import logging
 import json
 import os
+import asyncio
+from startup import load_HDB_carpark_data, update_realtime_availability_task, parse_ura_feature, load_URA_carpark_data
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -12,7 +14,7 @@ load_dotenv()
 
 ONEMAP_USERNAME = os.getenv('ONEMAP_USERNAME')
 ONEMAP_PASSWORD = os.getenv('ONEMAP_PASSWORD')
-onemap_access_token = os.getenv('ACCESS_TOKEN')
+onemap_access_token = None
 onemap_token_expiry = 0
 
 # import method from prep_data.py to get carpark data
@@ -22,14 +24,8 @@ onemap_token_expiry = 0
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-carpark_data = None  # Global variable to store carpark data
-
-# if carpark_data is None:
-#     # Load carpark data from CSV file
-#     carpark_data = load_carpark_data('HDBCarparkInformation.csv')
-#     if not carpark_data:
-#         logger.error("Failed to load carpark data. Ensure the CSV file is correctly formatted and exists.")
-#         raise HTTPException(status_code=500, detail="Carpark data not available")
+carpark_data = {}
+real_time_data = {}
 
 app = FastAPI(
     title="Singapore Carpark Finder API",
@@ -40,9 +36,10 @@ app = FastAPI(
 # Configure CORS
 # For development, allow all origins. In production, restrict this to frontend's domain.
 origins = [
-    "http://localhost",
-    "http://localhost:3000",  # Create React App default port
+    "*"
     # Add deployed frontend URL here post-deployment of React app:
+    # "http://localhost",
+    # "http://localhost:3000",
     # "https://frontend-app.netlify.app",
     # "https://Mohammed-Faizzzz.github.io" # If hosted on GitHub Pages (adjust path for repo name)
 ]
@@ -73,10 +70,10 @@ async def get_onemap_token():
         })
         response.raise_for_status()
         token_data = response.json()
-        print("\nToken Response Data:", token_data)  # Debugging: Print the token response
+        print("\nToken Response Data:", token_data)
         
         onemap_access_token = token_data.get('access_token')
-        onemap_token_expiry = token_data.get('expiry_timestamp') # This is a Unix timestamp in milliseconds, need to convert
+        onemap_token_expiry = token_data.get('expiry_timestamp')
         
         if onemap_access_token and onemap_token_expiry:
             # Convert milliseconds to seconds for Python's time.time()
@@ -92,9 +89,64 @@ async def get_onemap_token():
         logger.error(f"Error parsing OneMap token response: {e}")
         raise HTTPException(status_code=500, detail="Failed to parse OneMap token response.")
 
+def get_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculates the distance between two geographical points (latitude, longitude)
+    using the Haversine formula.
+
+    Args:
+        lat1 (float): Latitude of the first point.
+        lon1 (float): Longitude of the first point.
+        lat2 (float): Latitude of the second point.
+        lon2 (float): Longitude of the second point.
+
+    Returns:
+        float: The distance between the two points in meters.
+    """
+    R = 6371e3  # Earth's radius in meters
+    
+    # Convert latitudes and longitudes from degrees to radians
+    φ1 = math.radians(lat1)
+    φ2 = math.radians(lat2)
+    Δφ = math.radians(lat2 - lat1)  # Difference in latitudes
+    Δλ = math.radians(lon2 - lon1)  # Difference in longitudes
+
+    # Haversine formula calculation
+    a = math.sin(Δφ / 2) * math.sin(Δφ / 2) + \
+        math.cos(φ1) * math.cos(φ2) * \
+        math.sin(Δλ / 2) * math.sin(Δλ / 2)
+    
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    d = R * c  # Distance in meters
+    return d
+    
+@app.on_event("startup")
+async def startup_event():
+    """
+    Loads static carpark data (HDB & URA) and starts the real-time availability background task.
+    This runs once when the FastAPI application starts.
+    """
+    global carpark_data
+    global real_time_data
+    
+    # Load URA carpark data from GeoJSON file
+    prep_data_file_ura = './URAParkingLotGEOJSON.geojson'
+    carpark_data = load_URA_carpark_data(prep_data_file_ura, carpark_data)
+
+    # Load HDB static data using the imported function
+    hdb_csv_path = './HDBCarparkInformation.csv'
+    carpark_data = load_HDB_carpark_data(hdb_csv_path, carpark_data)
+    real_time_data = carpark_data.copy()
+
+    # Start the background task to update real-time availability
+    asyncio.create_task(update_realtime_availability_task(real_time_data))
+
 
 @app.get("/find-carpark")
-async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, regex="^[0-9]{6}$")):
+# async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, regex="^[0-9]{6}$")):
+async def find_carpark():
+    postcode = "341119"
     logger.info(f"Received request for postcode: {postcode}")
 
     user_lat, user_lng = None, None
@@ -127,25 +179,38 @@ async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, re
         logger.error(f"Error processing OneMap data for {postcode}: {e}")
         raise HTTPException(status_code=500, detail="An internal error occurred processing postcode data.")
 
-    # 2. Get Carpark Availability Data from Data.gov.sg
-    carparks = []
-    try:
-        carpark_api_url = "https://api.data.gov.sg/v1/transport/carpark-availability"
-        carpark_response = requests.get(carpark_api_url)
-        carpark_response.raise_for_status()
-        carpark_data = carpark_response.json()
-        # output to a json file for debugging
-        print(len(carpark_data['items']))
-        with open('carpark_data.json', 'w') as f:
-            json.dump(carpark_data, f, indent=4)
-        # print(carpark_data)  # Debugging: Print the carpark data to check its structure
+    # 2. Calculate Nearest Available Carparks
+    searchable_carparks = []
     
-    except Exception as e:
-        logger.error(f"Error fetching carpark data: {e}")
-        raise HTTPException(status_code=500, detail="Error fetching carpark data")
-    finally:
-        return None
+    if not carpark_data:
+        logger.warning("Global carpark_data is empty. Check startup loading.")
+        raise HTTPException(status_code=500, detail="Carpark data not loaded or is empty.")
+
+    for cp_number, cp_info in carpark_data.items():
+        carpark = cp_info.copy() # Make a copy to avoid modifying the global dict during iteration
+        
+        # Determine if carpark should be included and its status
+        if carpark['type'] == 'HDB':
+            carpark['total_lots'] = real_time_data.get(cp_number, {}).get('total_lots', 0)
+            carpark['available_lots'] = real_time_data.get(cp_number, {}).get('available_lots', 'N/A')
+
+        carpark_lat, carpark_lng = carpark['coordinates']
+
+        # Calculate distance
+        distance = get_distance(user_lat, user_lng, carpark_lat, carpark_lng)
+        carpark['distance'] = distance
+        searchable_carparks.append(carpark)
+
+    if not searchable_carparks:
+        # print(f"No suitable carparks found near postcode {postcode} (either no available HDB or no nearby URA).")
+        raise HTTPException(status_code=404, detail="No suitable carparks found near this postcode.")
+
+    # 3. Return Nearest Carpark Details
+    searchable_carparks.sort(key=lambda cp: cp['distance'])
     
-    # 3. Calculate Nearest Available Carpark
+    top_n_carparks = searchable_carparks[:10]
     
-    # 4. Return Nearest Carpark Details
+    # print(f"Returning top {len(top_n_carparks)} nearest suitable carparks for {postcode}.")
+    print(top_n_carparks)
+    return top_n_carparks
+    

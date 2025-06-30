@@ -14,7 +14,7 @@ function App() {
 
         try {
             // Make a request to Python backend
-            const response = await fetch(`http://127.0.0.1:5000/find-carpark?postcode=${postcode}`); // Adjust URL for backend
+            const response = await fetch(`http://localhost:5000/find-carpark?postcode=${postcode}`); // Adjust URL for backend
             const data = await response.json();
 
             if (response.ok) {
