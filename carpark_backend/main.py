@@ -4,8 +4,21 @@ import requests
 import math
 import logging
 import json
+import os
+
+# import access_token from .env file
+from dotenv import load_dotenv
+load_dotenv()
+# --- OneMap Authentication Details (from .env) ---
+ONEMAP_USERNAME = os.getenv('ONEMAP_USERNAME') # Your OneMap registered email
+ONEMAP_PASSWORD = os.getenv('ONEMAP_PASSWORD') # Your OneMap password
+
+# Global variable to store the access token and its expiry
+onemap_access_token = os.getenv('ACCESS_TOKEN')  # Access token for OneMap API
+onemap_token_expiry = 0 # Unix timestamp
+
 # import method from prep_data.py to get carpark data
-from prep_data import load_carpark_data
+# from prep_data import load_carpark_data
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -13,12 +26,12 @@ logger = logging.getLogger(__name__)
 
 carpark_data = None  # Global variable to store carpark data
 
-if carpark_data is None:
-    # Load carpark data from CSV file
-    carpark_data = load_carpark_data('HDBCarparkInformation.csv')
-    if not carpark_data:
-        logger.error("Failed to load carpark data. Ensure the CSV file is correctly formatted and exists.")
-        raise HTTPException(status_code=500, detail="Carpark data not available")
+# if carpark_data is None:
+#     # Load carpark data from CSV file
+#     carpark_data = load_carpark_data('HDBCarparkInformation.csv')
+#     if not carpark_data:
+#         logger.error("Failed to load carpark data. Ensure the CSV file is correctly formatted and exists.")
+#         raise HTTPException(status_code=500, detail="Carpark data not available")
 
 app = FastAPI(
     title="Singapore Carpark Finder API",
@@ -44,17 +57,78 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-    
+async def get_onemap_token():
+    global onemap_access_token, onemap_token_expiry
+    import time # Import time inside function to avoid global import if not always needed
+
+    # Check if token is still valid (e.g., expires in next 5 minutes, get a new one)
+    if onemap_access_token and onemap_token_expiry > time.time() + 300: # Refresh if less than 5 min to expiry
+        logger.info("Using existing OneMap access token.")
+        return onemap_access_token
+
+    logger.info("Requesting new OneMap access token...")
+    try:
+        token_url = "https://www.onemap.gov.sg/api/auth/post/getToken" # Confirm this URL with OneMap docs
+        response = requests.post(token_url, json={
+            "email": ONEMAP_USERNAME,
+            "password": ONEMAP_PASSWORD
+        })
+        response.raise_for_status()
+        token_data = response.json()
+        print("\nToken Response Data:", token_data)  # Debugging: Print the token response
+        
+        onemap_access_token = token_data.get('access_token')
+        onemap_token_expiry = token_data.get('expiry_timestamp') # This is a Unix timestamp in milliseconds, need to convert
+        
+        if onemap_access_token and onemap_token_expiry:
+            # Convert milliseconds to seconds for Python's time.time()
+            onemap_token_expiry = int(onemap_token_expiry) / 1000.0
+            logger.info(f"Successfully obtained OneMap access token. Expires at: {time.ctime(onemap_token_expiry)}")
+            return onemap_access_token
+        else:
+            raise ValueError("Access token or expiry missing from OneMap response.")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to get OneMap access token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to authenticate with OneMap API.")
+    except (ValueError, KeyError, TypeError) as e:
+        logger.error(f"Error parsing OneMap token response: {e}")
+        raise HTTPException(status_code=500, detail="Failed to parse OneMap token response.")
+
+
 @app.get("/find-carpark")
-async def find_nearest_carpark(postcode: str = Query(..., min_length=6, max_length=6, regex="^[0-9]{6}$")):
-    
-    # 1. Get Postcode Coordinates using OpenMap API (elasticsearch)
+async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, regex="^[0-9]{6}$")):
     logger.info(f"Received request for postcode: {postcode}")
-    url = "https://www.onemap.gov.sg/api/common/elastic/search?searchVal={postcode}&returnGeom=Y&getAddrDetails=Y&pageNum=1"
-      
-    headers = {"Authorization": "Bearer **********************"}
-            
-    response = requests.get(url, headers=headers)
+
+    user_lat, user_lng = None, None
+
+    # Get OneMap access token
+    token = await get_onemap_token()
+    headers = {"Authorization": f"Bearer {token}"} # Use the obtained token in the header
+
+    # 1. Get Postcode Coordinates from OneMap API
+    try:
+        onemap_url = f"https://www.onemap.gov.sg/api/common/elastic/search?searchVal={postcode}&returnGeom=Y&getAddrDetails=Y&pageNum=1"
+        onemap_response = requests.get(onemap_url, headers=headers) # Pass the headers here
+        onemap_response.raise_for_status()
+        onemap_data = onemap_response.json()
+
+        if onemap_data and onemap_data.get('results'):
+            first_result = onemap_data['results'][0]
+            user_lat = float(first_result.get('LATITUDE'))
+            user_lng = float(first_result.get('LONGITUDE'))
+            if user_lat is None or user_lng is None:
+                 raise ValueError("Latitude or Longitude missing from OneMap response.")
+            logger.info(f"OneMap: Postcode {postcode} geocoded to {user_lat}, {user_lng}")
+        else:
+            logger.warning(f"OneMap: No results found for postcode {postcode}")
+            raise HTTPException(status_code=404, detail="Postcode not found or invalid.")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"OneMap API request failed: {e}")
+        # Consider refreshing token and retrying if it's a 401 error
+        raise HTTPException(status_code=500, detail="Error connecting to OneMap API.")
+    except (ValueError, KeyError, TypeError) as e:
+        logger.error(f"Error processing OneMap data for {postcode}: {e}")
+        raise HTTPException(status_code=500, detail="An internal error occurred processing postcode data.")
 
     # 2. Get Carpark Availability Data from Data.gov.sg
     carparks = []
