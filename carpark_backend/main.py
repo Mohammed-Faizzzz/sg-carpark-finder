@@ -144,9 +144,9 @@ async def startup_event():
 
 
 @app.get("/find-carpark")
-# async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, regex="^[0-9]{6}$")):
-async def find_carpark():
-    postcode = "341119"
+async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, regex="^[0-9]{6}$")):
+# async def find_carpark():
+    # postcode = "341119"
     logger.info(f"Received request for postcode: {postcode}")
 
     user_lat, user_lng = None, None
