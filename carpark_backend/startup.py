@@ -33,6 +33,8 @@ def load_HDB_carpark_data(file_path):
                     'address': address,
                     'coordinates': (lat, lng),
                     'type': 'HDB',
+                    'total_lots': 0,
+                    'available_lots': 'N/A',
                 }
     except FileNotFoundError:
         print(f"Error: The file {file_path} was not found.")
@@ -40,8 +42,34 @@ def load_HDB_carpark_data(file_path):
         print(f"An error occurred while reading the file: {e}")
     return carpark_data
 
+def update_realtime_availability_task(dictionary):
+    # while True:
+    print("Updating real-time carpark availability...")
+    try:
+        carpark_api_url = "https://api.data.gov.sg/v1/transport/carpark-availability"
+        carpark_response = requests.get(carpark_api_url)
+        carpark_response.raise_for_status()
+        carpark_data = carpark_response.json()
+        
+        if carpark_data and carpark_data.get('items') and carpark_data['items'][0].get('carpark_data'):
+            for cp in carpark_data['items'][0]['carpark_data']:
+                carpark_number = cp.get('carpark_number')
+                carpark_info = cp.get('carpark_info')[0]
+                print(f"Processing carpark {carpark_number} with info: {carpark_info}")
+                total_lots, available_lots = carpark_info.get('total_lots'), carpark_info.get('lots_available')
+                print(f"Processing carpark {carpark_number}: Total Lots = {total_lots}, Available Lots = {available_lots}")
+                if carpark_number in dictionary:
+                    dictionary[carpark_number]['total_lots'] = int(total_lots) if total_lots else 0
+                    dictionary[carpark_number]['available_lots'] = int(available_lots) if available_lots else 'N/A'
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to fetch real-time carpark availability: {e}")
+    except Exception as e:
+        print(f"Error processing real-time availability data: {e}")
+    # await asyncio.sleep(60)
+
 prep_data_file = './HDBCarparkInformation.csv'
 carpark_data = load_HDB_carpark_data(prep_data_file)
+update_realtime_availability_task(carpark_data)
 print(f"Loaded {len(carpark_data)} carparks from {prep_data_file}")
 print(list(carpark_data.keys())[:10])
 print(list(carpark_data.values())[:10])
@@ -95,13 +123,14 @@ def parse_ura_feature(feature, carpark_data):
         return None
     
     if carpark_number in carpark_data:
-        carpark_data[carpark_number]['total_lots_static'] += 1
+        carpark_data[carpark_number]['total_lots'] += 1
     else:
         carpark_data[carpark_number] = {
             'address': carpark_info.get('PARKING_PL', 'N/A'),
             'coordinates': (lat, lng),
             'type': 'URA',
-            'total_lots_static': 1
+            'total_lots': 1,
+            'available_lots': 'N/A',
         }
 
 def load_URA_carpark_data(file_path):
