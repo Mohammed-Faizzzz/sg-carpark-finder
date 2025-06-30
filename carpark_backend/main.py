@@ -6,16 +6,14 @@ import logging
 import json
 import os
 
-# import access_token from .env file
+# Load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv()
-# --- OneMap Authentication Details (from .env) ---
-ONEMAP_USERNAME = os.getenv('ONEMAP_USERNAME') # Your OneMap registered email
-ONEMAP_PASSWORD = os.getenv('ONEMAP_PASSWORD') # Your OneMap password
 
-# Global variable to store the access token and its expiry
-onemap_access_token = os.getenv('ACCESS_TOKEN')  # Access token for OneMap API
-onemap_token_expiry = 0 # Unix timestamp
+ONEMAP_USERNAME = os.getenv('ONEMAP_USERNAME')
+ONEMAP_PASSWORD = os.getenv('ONEMAP_PASSWORD')
+onemap_access_token = os.getenv('ACCESS_TOKEN')
+onemap_token_expiry = 0
 
 # import method from prep_data.py to get carpark data
 # from prep_data import load_carpark_data
@@ -59,9 +57,9 @@ app.add_middleware(
 
 async def get_onemap_token():
     global onemap_access_token, onemap_token_expiry
-    import time # Import time inside function to avoid global import if not always needed
+    import time
 
-    # Check if token is still valid (e.g., expires in next 5 minutes, get a new one)
+    # Check if token is still valid
     if onemap_access_token and onemap_token_expiry > time.time() + 300: # Refresh if less than 5 min to expiry
         logger.info("Using existing OneMap access token.")
         return onemap_access_token
@@ -108,7 +106,7 @@ async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, re
     # 1. Get Postcode Coordinates from OneMap API
     try:
         onemap_url = f"https://www.onemap.gov.sg/api/common/elastic/search?searchVal={postcode}&returnGeom=Y&getAddrDetails=Y&pageNum=1"
-        onemap_response = requests.get(onemap_url, headers=headers) # Pass the headers here
+        onemap_response = requests.get(onemap_url, headers=headers)
         onemap_response.raise_for_status()
         onemap_data = onemap_response.json()
 
@@ -124,7 +122,6 @@ async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, re
             raise HTTPException(status_code=404, detail="Postcode not found or invalid.")
     except requests.exceptions.RequestException as e:
         logger.error(f"OneMap API request failed: {e}")
-        # Consider refreshing token and retrying if it's a 401 error
         raise HTTPException(status_code=500, detail="Error connecting to OneMap API.")
     except (ValueError, KeyError, TypeError) as e:
         logger.error(f"Error processing OneMap data for {postcode}: {e}")
@@ -135,7 +132,7 @@ async def find_carpark(postcode: str = Query(..., min_length=6, max_length=6, re
     try:
         carpark_api_url = "https://api.data.gov.sg/v1/transport/carpark-availability"
         carpark_response = requests.get(carpark_api_url)
-        carpark_response.raise_for_status() # Raise an exception for HTTP errors
+        carpark_response.raise_for_status()
         carpark_data = carpark_response.json()
         # output to a json file for debugging
         print(len(carpark_data['items']))
