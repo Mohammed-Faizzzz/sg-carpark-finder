@@ -33,6 +33,7 @@ def load_HDB_carpark_data(file_path, carpark_data):
                 y_coord = float(row['y_coord'])
                 lng, lat = svy21_to_wgs84_transformer.transform(x_coord, y_coord)
                 carpark_data[carpark_number] = {
+                    'carpark_number': carpark_number,
                     'address': address,
                     'coordinates': (lat, lng),
                     'type': 'HDB',
@@ -129,6 +130,7 @@ def parse_ura_feature(feature, carpark_data):
         carpark_data[carpark_number]['total_lots'] += 1
     else:
         carpark_data[carpark_number] = {
+            'carpark_number': carpark_number,
             'address': carpark_info.get('PARKING_PL', 'N/A'),
             'coordinates': (lat, lng),
             'type': 'URA',

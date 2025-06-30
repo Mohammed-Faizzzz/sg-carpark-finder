@@ -37,22 +37,6 @@ function App() {
         }
     };
 
-    const getAvailabilityBadge = (status) => {
-        let badgeClass = '';
-        let badgeText = status;
-        if (status === 'Real-time Available') {
-            badgeClass = 'status-available';
-            badgeText = 'Available';
-        } else if (status === 'Real-time Full') {
-            badgeClass = 'status-full';
-            badgeText = 'Full';
-        } else if (status === 'Static Data - Check on Site' || status === 'Initial Static') {
-            badgeClass = 'status-static';
-            badgeText = 'Availability Unknown'; // Or "Static Data"
-        }
-        return <span className={`status-badge ${badgeClass}`}>{badgeText}</span>;
-    };
-
     return (
         <div className="container">
             <h1>Nearest Carpark Finder (SG)</h1>
@@ -87,26 +71,22 @@ function App() {
                         <div key={carpark.carpark_number} className="carpark-item">
                             <div className="carpark-item-header">
                                 <h3 className="carpark-item-title">{carpark.name || carpark.carpark_number}</h3> 
-                                {getAvailabilityBadge(carpark.availability_status)}
                             </div>
                             
                             <div className="carpark-item-details">
                                 <p><strong>Code:</strong> {carpark.carpark_number}</p>
                                 <p><strong>Address:</strong> {carpark.address}</p>
                                 <p><strong>Type:</strong> {carpark.type}</p>
-                                
-                                {carpark.availability_status === 'Real-time Available' || carpark.availability_status === 'Real-time Full' ? (
-                                    <p><strong>Lots:</strong> {carpark.available_lots} / {carpark.total_lots}</p>
-                                ) : (
-                                    <p><strong>Total Lots (Static):</strong> {carpark.total_lots || carpark.total_lots_static}</p>
-                                )}
+                                <p><strong>Available Lots:</strong> {carpark.available_lots}</p>
+                                <p><strong>Total Lots (Static):</strong> {carpark.total_lots || carpark.total_lots_static}</p>
+                        
                                 
                                 <p><strong>Distance:</strong> {(carpark.distance / 1000).toFixed(2)} km</p>
                             </div>
 
                             <div className="carpark-item-actions">
                                 <a 
-                                    href={`https://developers.google.com/maps/documentation/javascript/kml9{carpark.lat},${carpark.lng}`} 
+                                    href={`https://www.google.com/maps/search/?api=1&query=${carpark.lat},${carpark.lng}`} 
                                     target="_blank" 
                                     rel="noopener noreferrer" 
                                 >
