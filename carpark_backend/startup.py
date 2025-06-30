@@ -11,7 +11,7 @@ import logging
 import json
 import os
 from bs4 import BeautifulSoup
-import logger
+from pyproj import Transformer
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -19,6 +19,7 @@ load_dotenv()
 
 def load_HDB_carpark_data(file_path):
     carpark_data = {}
+    svy21_to_wgs84_transformer = Transformer.from_crs("EPSG:3414", "EPSG:4326", always_xy=True)
     try:
         with open(file_path, mode='r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
@@ -27,9 +28,10 @@ def load_HDB_carpark_data(file_path):
                 address = row['address']
                 x_coord = float(row['x_coord'])
                 y_coord = float(row['y_coord'])
+                lng, lat = svy21_to_wgs84_transformer.transform(x_coord, y_coord)
                 carpark_data[carpark_number] = {
                     'address': address,
-                    'coordinates': (x_coord, y_coord),
+                    'coordinates': (lat, lng),
                     'type': 'HDB',
                 }
     except FileNotFoundError:
