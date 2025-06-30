@@ -67,8 +67,18 @@ function App() {
             {carparkResults.length > 0 && (
                 <div id="results">
                     <h2>Found Carpark Results</h2>
-                    {carparkResults.map((carpark) => (
-                        <div key={carpark.carpark_number} className="carpark-item">
+                    {carparkResults.map((carpark) => {
+                        let displayLat, displayLng;
+
+                        if (carpark.coordinates && Array.isArray(carpark.coordinates) && carpark.coordinates.length === 2) {
+                            displayLat = carpark.coordinates[0];
+                            displayLng = carpark.coordinates[1];
+                        } else {
+                            displayLat = 'N/A';
+                            displayLng = 'N/A';
+                        }
+                        return (
+                            <div key={carpark.carpark_number} className="carpark-item">
                             <div className="carpark-item-header">
                                 <h3 className="carpark-item-title">{carpark.name || carpark.carpark_number}</h3> 
                             </div>
@@ -86,7 +96,7 @@ function App() {
 
                             <div className="carpark-item-actions">
                                 <a 
-                                    href={`https://www.google.com/maps/search/?api=1&query=${carpark.lat},${carpark.lng}`} 
+                                    href={`https://www.google.com/maps/search/?api=1&query=${displayLat},${displayLng}`} 
                                     target="_blank" 
                                     rel="noopener noreferrer" 
                                 >
@@ -94,7 +104,8 @@ function App() {
                                 </a>
                             </div>
                         </div>
-                    ))}
+                        );                        
+                    })}
                 </div>
             )}
         </div>
